@@ -84,6 +84,8 @@ public IActionResult ReceiveWebhook([FromBody] JsonElement body)
                 string messageText = messages.GetProperty("text").GetProperty("body").GetString();
 
                 // Now you can store these in DB or process further
+
+
             }
         }
     }
