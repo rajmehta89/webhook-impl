@@ -6,6 +6,8 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using WhatsappWebHook.Data;
+using System.Net.Http.Headers;
+
 using WhatsappWebHook.Models;
 
 namespace WhatsappWebHook.Controllers
@@ -74,12 +76,93 @@ namespace WhatsappWebHook.Controllers
         }
 
         // POST: /webhook - Receive incoming WhatsApp messages from Twilio webhook and save
+        // [HttpPost]
+        // public async Task<IActionResult> ReceiveTwilioWebhook()
+        // {
+        //     try
+        //     {
+        //         // Safely read form parameters as nullable strings
+        //         string? messageSid = Request.Form["MessageSid"];
+        //         string? accountSid = Request.Form["AccountSid"];
+        //         string? from = Request.Form["From"];
+        //         string? to = Request.Form["To"];
+        //         string? body = Request.Form["Body"];
+        //         string? waId = Request.Form["WaId"];
+        //         string? profileName = Request.Form["ProfileName"];
+        //         string? numMediaStr = Request.Form["NumMedia"];
+        //         string? apiVersion = Request.Form["ApiVersion"];
+        //         string? smsStatus = Request.Form["SmsStatus"];
+        //         string? smsMessageSid = Request.Form["SmsMessageSid"];
+        //         string? numSegmentsStr = Request.Form["NumSegments"];
+        //         string? messageType = Request.Form["MessageType"];
+        //         string? channelMetadata = Request.Form["ChannelMetadata"];
+
+        //         // Parse numeric fields safely
+        //         int.TryParse(numMediaStr, out int numMedia);
+        //         int.TryParse(numSegmentsStr, out int numSegments);
+
+        //         // Initialize media variables as null; will assign only if media exists
+        //         string mediaContentType = "";
+        //         string mediaUrl = "";
+        //         string mediaSid = "";
+
+        //         // Check if there is any media, and assign first media item's details
+        //         if (numMedia > 0)
+        //         {
+        //             mediaContentType = Request.Form["MediaContentType0"];
+        //             mediaUrl = Request.Form["MediaUrl0"];
+        //             mediaSid = Request.Form["MediaSid0"];
+        //         }
+
+        //         _logger.LogInformation("Received WhatsApp message from {From}, Body: {Body}, NumMedia: {NumMedia}, MessageType: {MessageType}",
+        //             from, body, numMedia, messageType);
+
+        //         var message = new WhatsAppMessage
+        //         {
+        //             MessageSid = messageSid,
+        //             AccountSid = accountSid,
+        //             From = from,
+        //             To = to,
+        //             Body = body,
+        //             WaId = waId,
+        //             ProfileName = profileName,
+        //             NumMedia = numMedia,
+        //             ApiVersion = apiVersion,
+        //             SmsStatus = smsStatus,
+        //             SmsMessageSid = smsMessageSid,
+        //             NumSegments = numSegments,
+        //             MessageType = messageType,
+        //             ChannelMetadata = channelMetadata,
+        //             ReceivedAt = DateTime.UtcNow,
+        //             MediaContentType = mediaContentType,
+        //             MediaUrl = mediaUrl,
+        //             MediaSid = mediaSid
+        //         };
+
+        //         _dbContext.WhatsAppMessages.Add(message);
+        //         await _dbContext.SaveChangesAsync();
+
+        //         _logger.LogInformation("Saved WhatsApp message {MessageSid} from {From}", messageSid, from);
+
+        //         return Ok();
+        //     }
+        //     catch (Exception ex)
+        //     {
+        //         _logger.LogError(ex, "Error processing Twilio WhatsApp webhook.");
+        //         return BadRequest();
+        //     }
+        // }
+
         [HttpPost]
         public async Task<IActionResult> ReceiveTwilioWebhook()
         {
             try
             {
-                // Safely read form parameters as nullable strings
+                // Fetch Twilio credentials from configuration
+                string twilioAccountSid = _configuration["Twilio:AccountSid"];
+                string twilioAuthToken = _configuration["Twilio:AuthToken"];
+
+                // Read form parameters safely
                 string? messageSid = Request.Form["MessageSid"];
                 string? accountSid = Request.Form["AccountSid"];
                 string? from = Request.Form["From"];
@@ -95,21 +178,54 @@ namespace WhatsappWebHook.Controllers
                 string? messageType = Request.Form["MessageType"];
                 string? channelMetadata = Request.Form["ChannelMetadata"];
 
-                // Parse numeric fields safely
                 int.TryParse(numMediaStr, out int numMedia);
                 int.TryParse(numSegmentsStr, out int numSegments);
 
-                // Initialize media variables as null; will assign only if media exists
-              string mediaContentType = "";
-string mediaUrl = "";
-string mediaSid = "";
+                string mediaContentType = string.Empty;
+                string mediaUrlRemote = string.Empty;
+                string mediaSid = string.Empty;
+                string mediaLocalPath = string.Empty;
 
-                // Check if there is any media, and assign first media item's details
                 if (numMedia > 0)
                 {
                     mediaContentType = Request.Form["MediaContentType0"];
-                    mediaUrl = Request.Form["MediaUrl0"];
+                    mediaUrlRemote = Request.Form["MediaUrl0"];
                     mediaSid = Request.Form["MediaSid0"];
+
+                    if (!string.IsNullOrWhiteSpace(mediaUrlRemote))
+                    {
+                        
+                        var authToken = Convert.ToBase64String(
+                            System.Text.Encoding.ASCII.GetBytes($"{twilioAccountSid}:{twilioAuthToken}"));
+
+                        using var httpClient = new HttpClient();
+                        httpClient.DefaultRequestHeaders.Authorization =
+                            new AuthenticationHeaderValue("Basic", authToken);
+
+                        string fileExtension = GetFileExtensionFromContentType(mediaContentType ?? "");
+
+                        // Generate filename with prefix and timestamp
+                        string timestamp = DateTime.UtcNow.ToString("yyyyMMddHHmmssfff");
+
+                        string fileName = $"file_{timestamp}{fileExtension}";
+
+                        string folderPath = @"D:\documents_twillio";
+
+                        Directory.CreateDirectory(folderPath);
+
+                        string localFilePath = Path.Combine(folderPath, fileName);
+
+                        using var response = await httpClient.GetAsync(mediaUrlRemote, CancellationToken.None);
+
+                        response.EnsureSuccessStatusCode();
+
+                        await using var fileStream = new FileStream(localFilePath, FileMode.Create, FileAccess.Write);
+
+                        await response.Content.CopyToAsync(fileStream);
+
+                        mediaLocalPath = localFilePath;
+                    }
+                    
                 }
 
                 _logger.LogInformation("Received WhatsApp message from {From}, Body: {Body}, NumMedia: {NumMedia}, MessageType: {MessageType}",
@@ -133,7 +249,7 @@ string mediaSid = "";
                     ChannelMetadata = channelMetadata,
                     ReceivedAt = DateTime.UtcNow,
                     MediaContentType = mediaContentType,
-                    MediaUrl = mediaUrl,
+                    MediaUrl = mediaLocalPath,  // storing local file path here
                     MediaSid = mediaSid
                 };
 
@@ -150,5 +266,37 @@ string mediaSid = "";
                 return BadRequest();
             }
         }
+
+        /// <summary>
+        /// Helper to get file extension from content type.
+        /// </summary>
+        private string GetFileExtensionFromContentType(string contentType)
+        {
+            return contentType?.ToLower() switch
+            {
+                "image/jpeg" => ".jpg",
+                "image/png" => ".png",
+                "image/gif" => ".gif",
+                "application/pdf" => ".pdf",
+                "application/msword" => ".doc",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => ".docx",
+                "text/plain" => ".txt",
+                "application/zip" => ".zip",
+                _ => ""
+            };
+        }
+
+private string? SanitizeFileName(string? input)
+{
+    if (string.IsNullOrWhiteSpace(input))
+        return null;
+
+    foreach (var c in Path.GetInvalidFileNameChars())
+    {
+        input = input.Replace(c.ToString(), "");
+    }
+    return input;
+}
+
     }
 }
